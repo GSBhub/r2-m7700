@@ -1,8 +1,8 @@
 NAME=asm_m7700
 export PATH := $(PATH):../r2_bin/include/
-R2_PLUGIN_PATH=$(shell r2 -hh|grep LIBR_PLUGINS|awk '{print $$2}')
-CFLAGS=-g -fPIC -I ../r2_bin/include/libr/ # $(shell pkg-config --cflags r_asm) 
-LDFLAGS=-shared -I ../r2_bin/include/libr/ #$(shell pkg-config --libs r_asm)
+R2_PLUGIN_PATH= $(shell r2 -hh|grep LIBR_PLUGINS|awk '{print $$2}') # /home/greg/.radare2/install/3.2.0-git/
+CFLAGS=-g -fPIC -I ../r2_bin/libr/include # $(shell pkg-config --cflags r_asm) 
+LDFLAGS=-shared -I ../r2_bin/libr/include/ #$(shell pkg-config --libs r_asm)
 OBJS=$(NAME).o
 SO_EXT=$(shell uname|grep -q Darwin && echo dylib || echo so)
 LIB=$(NAME).$(SO_EXT)

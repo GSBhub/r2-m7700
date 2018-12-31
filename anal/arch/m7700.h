@@ -11,6 +11,14 @@
 
 
  */
+
+#ifndef R_ASM
+	#include <r_asm.h>
+#endif
+#ifndef R_LIB
+	#include <r_lib.h>
+#endif
+
 #define OPS 256  // total ops size for our structs
 
 #define ut24 int // define ut24 int field, used for the multiple-param func calls - functionally same as the ut32 struct that comes with radare2, but this is a better name since we're just using the lower 3 bytes
@@ -53,7 +61,7 @@ enum
 	SBCB, EORB, TBX, CMPB, INB, DEB, TXB, TYB, LSRB, ORB, CLB,
 	BBC, BBS, TBY, ANDB, PUL, PSH, PLAB, XAB, PHB, TBS, TBD,
 	TDB
-} op;
+};
 
 // addressing mode bits
 enum
@@ -188,7 +196,7 @@ static const OpCode ops42[OPS] = {
 // 0x40
 { UNK, I, SIG },{ EORB, M, DXI },{ UNK, I, SIG },{ EORB, M, S },
 { UNK, I, SIG },{ EORB, M, D },{ UNK, I, SIG },{ EORB, M, DLI },
-{ PHB, I, IMP },{ EORB, M, IMM },{ LSRB, M, ACC },{ UNK, I, SIG },
+{ PHB, I, IMP },{ EORB, M, IMM },{ LSRB, M, ACCB },{ UNK, I, SIG },
 { UNK, I, SIG },{ EORB, M, A },{ UNK, I, SIG },{ EORB, M, AL },
 // 0x50
 { UNK, I, SIG },{ EORB, M, DIY },{ EORB, M, DI },{ EORB, M, SIY },
@@ -198,7 +206,7 @@ static const OpCode ops42[OPS] = {
 // 0x60
 { UNK, I, SIG },{ ADCB, M, DXI },{ UNK, I, SIG },{ ADCB, M, S },
 { UNK, I, SIG },{ ADCB, M, D },{ UNK, I, SIG },{ ADCB, M, DLI },
-{ PLAB,I, IMP },{ ADCB, M, IMM },{ ROR, M, ACC },{ UNK, I, SIG },
+{ PLAB,I, IMP },{ ADCB, M, IMM },{ ROR, M, ACCB },{ UNK, I, SIG },
 { UNK, I, SIG },{ ADCB, M, A },{ UNK, I, SIG },{ ADCB, M, AL },
 // 0x70
 { UNK, I, SIG },{ ADCB, M, DIY },{ ADCB, M, DI },{ ADCB, M, SIY },
@@ -330,6 +338,108 @@ static const OpCode ops89[OPS] = {
 { UNK, I, SIG },{ UNK, I, SIG },{ UNK, I, SIG },{ UNK, I, SIG }
 };
 
+//define registers
+//static const char* register_label[] = {
+//	{"a"}, {"b"}, {"x"}, {"y"}, {"s"}, {"pc"}, {"pg"}, {"dt"}, {"dpr"}, {"ps"}
+//};
+
+#define SIZE_AX		16
+#define SIZE_AL		8
+
+#define SIZE_BX		16
+#define SIZE_BL		8
+
+#define SIZE_XX		16
+#define SIZE_XL		8
+
+#define SIZE_YX		16
+#define SIZE_YL		8
+
+#define SIZE_SX		16
+#define SIZE_SL		8
+
+#define SIZE_DT		8
+
+#define SIZE_PG		8
+#define SIZE_PCH	8
+#define	SIZE_PCL	8
+#define SIZE_PCR	SIZE_PG + SIZE_PCH + SIZE_PCL
+
+#define SIZE_DPRX	16
+#define SIZE_DPRL	8
+
+#define SIZE_PSX	16
+#define SIZE_PSL	8
+
+// operand size and position declarations
+
+#define SIZE_OPA 	8
+#define SIZE_OPAX 	16
+
+#define SIZE_OPB	8
+#define SIZE_OPBX	16
+
+#define SIZE_OPC	8
+#define SIZE_OPCX	16
+
+#define SIZE_OP 	16
+#define POS_OP		0
+
+#define POS_OPA		POS_OP + SIZE_OP
+
+#define POS_OPB		POS_OPA + SIZE_OPA
+#define POS_OPBX	POS_OPA + SIZE_OPAX
+
+#define POS_OPC		POS_OPB + SIZE_OPB
+#define POS_OPCX	POS_OPB + SIZE_OPBX
+
+// create a mask of n - 1 bits and a mask of n - 0 bits
+#define MASK1(n, p) ((~((~0))<< (n))<< (p))
+#define MASK0(n, p) (~MASK1(n, p))
+
+#define cast(x, y) ((x) y)
+
+// instruction manipulation macros - kind of copying some of the ones for lua, but editing for m7700
+#define GET_OP(i) (cast(op, ((i) >> POS_OP) & MASK1(SIZE_OP, 0)))
+#define SET_OP(i, o) ((i) = (((i) & MASK0(SIZE_OP, POS_OP)) | ((cast (ut16, o) << POS_OP) & MASK1 (SIZE_OP, POS_OP))))
+
+#define getarg(i, pos, size)      (cast (int, ((i) >> pos) & MASK1 (size, 0)))
+#define setarg(i, v, pos, size)    ((i) = (((i) & MASK0 (size, pos)) |\
+((cast (ut16, v) << pos) & MASK1 (size, pos))))
+
+#define GETARG_A(i)     	getarg (i, POS_OPA, SIZE_OPA)
+#define SETARG_A(i, v)   	setarg (i, v, POS_OPA, SIZE_OPA)
+
+#define GETARG_B(i)     	getarg (i, POS_OPB, SIZE_OPB)
+#define SETARG_B(i, v)   	setarg (i, v, POS_OPB, SIZE_OPB)
+
+#define GETARG_C(i)     	getarg (i, POS_OPC, SIZE_OPC)
+#define SETARG_C(i, v)   	setarg (i, v, POS_OPC, SIZE_OPC)
+
+#define GETARG_Bx(i)    	getarg (i, POS_OPBX, SIZE_OPBX)
+#define SETARG_Bx(i, v)  	setarg (i, v, POS_OPBX, SIZE_OPBX)
+
+#define GETARG_Ax(i)    	getarg (i, POS_OPAX, SIZE_OPAX)
+#define SETARG_Ax(i, v) 	setarg (i, v, POS_OPAX, SIZE_OPAX)
+
+#define GETARG_Cx(i)		getarg (i, POS_OPCX, SIZE_OPCX)
+#define SETARG_Cx(i, v) 	setarg(i, v, POS_OPCX, SIZE_OPCX)
+
+static short PROCESSOR_STATUS_REGISTER = 0; /* 16 bit data type for PS register, with flags
+
+ Defined as follows 
+		 15:11 	-> all 0's, const
+ 	     10:8 	-> processor interrupt priority level - 3 bit
+	     7 		-> N, negative flag
+	     6 		-> V, overflow flag
+	     5 		-> M, data length flag
+	     4		-> X, index register length flag
+	     3		-> D  decimal mode flag
+	     2		-> I  interrupt disable flag
+	     1		-> Z  zero flag
+	     0		-> C  carry flag
+ **/
+
 static ut8 read_8(const ut8* data, unsigned int offset);
 static ut16 read_16(const ut8* data, unsigned int offset);
 static ut24 read_24(const ut8* data, unsigned int offset);
@@ -339,4 +449,11 @@ static OpCode* GET_OPCODE(ut16 instruction, byte offset);
 static bool GLOB_M = true;
 static bool GLOB_X = false;
 static bool GLOB_I = false;
+
+static bool M_FLAGS[0xFFFF]; 
+static bool X_FLAGS[0xFFFF];
+
+static bool M_FLAGS_SET[0xFFFF];
+static bool X_FLAGS_SET[0xFFFF];
+
 // global trackers for the flag bits
