@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install radare2 from source
+        run: |
+          git clone --depth=1 https://github.com/radareorg/radare2.git /tmp/radare2
+          /tmp/radare2/sys/install.sh
+
+      - name: Build plugins
+        run: make
+
+      - name: Install plugins to r2 user plugin directory
+        run: |
+          mkdir -p ~/.local/share/radare2/plugins
+          cp asm/arch_m7700.so anal/anal_m7700.so ~/.local/share/radare2/plugins/
+
+      - name: Verify asm plugin registers with radare2
+        run: |
+          r2 -q -c "La~m7700" /dev/null | grep -q m7700
+
+      - name: Smoke test – asm plugin disassembles M7700 (SVX binary)
+        run: |
+          r2 -q -c "e scr.color=0; e asm.arch=m7700; e asm.bits=16; pd 20 @ 0x8000" \
+            test_bin/742521-1994-USDM-SVX-EG33.bin \
+            | grep -q "m:[01] x:[01]"
+
+      - name: Smoke test – asm plugin disassembles M7700 (Legacy-TT binary)
+        run: |
+          r2 -q -c "e scr.color=0; e asm.arch=m7700; e asm.bits=16; pd 20 @ 0x8000" \
+            test_bin/743A17-1995-JDM-Legacy-TT.bin \
+            | grep -q "m:[01] x:[01]"
+
+      - name: Smoke test – anal plugin loads without crash
+        run: |
+          r2 -q -c "e scr.color=0; e asm.arch=m7700; e asm.bits=16; pd 10 @ 0x8000" \
+            test_bin/742521-1994-USDM-SVX-EG33.bin

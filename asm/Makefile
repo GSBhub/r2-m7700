@@ -1,8 +1,7 @@
-NAME=asm_m7700
-export PATH := $(PATH):../r2_bin/include/
-R2_PLUGIN_PATH=$(shell r2 -hh|grep LIBR_PLUGINS|awk '{print $$2}')
-CFLAGS=-g -fPIC -I ../r2_bin/include/libr/ # $(shell pkg-config --cflags r_asm) 
-LDFLAGS=-shared -I ../r2_bin/include/libr/ #$(shell pkg-config --libs r_asm)
+NAME=arch_m7700
+R2_PLUGIN_PATH=$(shell r2 -hh 2>/dev/null | grep LIBR_PLUGINS | awk '{print $$2}')
+CFLAGS=-g -fPIC $(shell PKG_CONFIG_PATH=/usr/local/lib/pkgconfig pkg-config --cflags r_arch r_asm 2>/dev/null || echo -I/usr/local/include/libr)
+LDFLAGS=-shared
 OBJS=$(NAME).o
 SO_EXT=$(shell uname|grep -q Darwin && echo dylib || echo so)
 LIB=$(NAME).$(SO_EXT)

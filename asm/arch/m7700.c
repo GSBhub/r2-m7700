@@ -58,12 +58,12 @@ char* int_8_str(unsigned int val)
 
 	Each prefix contains func name, the addressing flag bit, and the arg
  */
-static OpCode *GET_OPCODE(ut16 instruction, byte prefix) {
+static const OpCode *GET_OPCODE(ut16 instruction, byte prefix) {
 
 	return (prefix == 0x89 ? ops89 + instruction : (prefix == 0x42 ? ops42 + instruction : ops + instruction));
 }
 
-static char* parse_args(OpCode *opcd, RAsmOp *op, unsigned int pc, unsigned int pb, ut8 *buf, int prefix, bool flag_x, bool flag_m, RAsm* a){
+static char* parse_args(const OpCode *opcd, RAsmOp *op, unsigned int pc, unsigned int pb, const ut8 *buf, int prefix, bool flag_x, bool flag_m, RAsm* a){
 
 	const int bufsize= 60; 
 	int var;
@@ -328,15 +328,14 @@ static int get_dest(char* params){
 	R2 Gives global fields a, op, buf, and len for populating a and op
 	
 */
-static int m7700_disassemble(RAsm *a, RAsmOp *op, ut8 *buf, ut64 len) {
+static int m7700_disassemble(RAsm *a, RAsmOp *op, const ut8 *buf, int len) {
 
 	//int idx = (buf[0] & 0x0f) * 2;
-	a->immdisp = true;
 	op->size = 1;
 	//char dest[20];
 	char arg[50];
 	ut16 instruction;
-	OpCode* opcd;
+	const OpCode* opcd;
 	int prefix = 0;
 	instruction = read_8(buf, 0); // grab instruction from buffer, with offset of 0
 
@@ -431,63 +430,37 @@ static int m7700_disassemble(RAsm *a, RAsmOp *op, ut8 *buf, ut64 len) {
 		GLOB_M = M_FLAGS[a->pc];
 	}
 
-	char* opname = instruction_set[opcd->op];
-	strcat(opname, "\0");
-    strcpy (op->buf_asm, opname);
+	r_asm_op_set_asm(op, instruction_set[opcd->op]);
 
-//X_FLAGS[a->pc]
-	// parse all variables, tokenize them, parse
-	char* vars = strtok(parse_args(opcd, op, (a->pc&0xffff), a->pc>>16, buf, prefix, !(GLOB_X) && (opcd->flag == X), !(GLOB_M) && opcd->flag == M, a), ",");
-
-	char* var_copy;
+	char* parse_result = parse_args(opcd, op, (a->pc&0xffff), a->pc>>16, buf, prefix, !(GLOB_X) && (opcd->flag == X), !(GLOB_M) && opcd->flag == M, a);
+	char* vars = strtok(parse_result, ",");
 
 	vars = vars + 2; // drop leading argno and space
 	int i = 0;
 
-	strcpy (arg, "\0");
+	strcpy(arg, "\0");
 
-  	while (vars != NULL)
-  	{
-		if (i > 1){
-			strcat (arg, " ");
-    		strcat (arg, vars);
-    		vars = strtok (NULL, " ,.-");
-	  	}
-		else if (i == 1) {
-    		strcat (arg, vars);
-    		vars = strtok (NULL, " ,.-");
-		}
-		else {
-			vars = strtok (NULL, " ,.-");
+	while (vars != NULL) {
+		if (i > 1) {
+			strcat(arg, " ");
+			strcat(arg, vars);
+			vars = strtok(NULL, " ,.-");
+		} else if (i == 1) {
+			strcat(arg, vars);
+			vars = strtok(NULL, " ,.-");
+		} else {
+			vars = strtok(NULL, " ,.-");
 		}
 		i++;
-  	}
-	//   if (strcmp(opname, "JSR")){ // attempt to define the boundaries for the JSR
+	}
 
-	//   	int dest_addr = get_dest(arg);
-	// // 	//printf("Dest addr: %d", dest_addr);
-	//   	if (!X_FLAGS_SET[dest_addr]){
-	//   		X_FLAGS[dest_addr] = GLOB_X;
-	//   		X_FLAGS_SET[dest_addr] = true;
-	//   	}
-	//   	if (!M_FLAGS_SET[dest_addr]){
-	//   		M_FLAGS[dest_addr] = GLOB_M;
-	//   		M_FLAGS_SET[dest_addr] = true;
-	//   	}
-	//   }  
+	if (*arg) {
+		r_strbuf_appendf(&op->buf_asm, " %s --  m:%s x:%s",
+			arg,
+			M_FLAGS[a->pc] ? "1" : "0",
+			X_FLAGS[a->pc] ? "1" : "0");
+	}
 
-	op->buf_inc += op->size;
-	
-    if (*arg) {
-        strcat (op->buf_asm, " ");
-        strcat (op->buf_asm, arg);
-		  strcat (op->buf_asm, " --  m:");
-		  strcat (op->buf_asm, M_FLAGS[a->pc] ? "1" : "0");
-		  strcat (op->buf_asm, " x:");
-		  strcat (op->buf_asm, X_FLAGS[a->pc] ? "1" : "0");
-		strcat (op->buf_asm, "\0"); 
-    }
-
-	free(vars);
+	free(parse_result);
 	return op->size;
 }

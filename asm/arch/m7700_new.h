@@ -444,7 +444,7 @@ static ut8 read_8(const ut8* data, unsigned int offset);
 static ut16 read_16(const ut8* data, unsigned int offset);
 static ut24 read_24(const ut8* data, unsigned int offset);
 
-static OpCode* GET_OPCODE(ut16 instruction, byte offset);
+static const OpCode* GET_OPCODE(ut16 instruction, byte offset);
 
 static bool GLOB_M = true;
 static bool GLOB_X = false;

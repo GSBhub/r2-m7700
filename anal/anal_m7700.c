@@ -4,6 +4,17 @@
 #include <r_lib.h>
 #include <r_asm.h>
 #include <r_anal.h>
+/* RAsmOp was removed from the r2 6.x public API; provide the same shim used in arch_m7700.c
+ * so that the shared m7700.c disassembler compiles when included here. */
+typedef struct {
+	int size;
+	RStrBuf buf_asm;
+} RAsmOp;
+
+static inline void r_asm_op_set_asm(RAsmOp *op, const char *str) {
+	r_strbuf_set(&op->buf_asm, str);
+}
+
 #include "../asm/arch/m7700.c"
 
 static bool ANAL_GLOB_M = true;
@@ -16,25 +27,6 @@ static bool ANAL_X_FLAGS[0xFFFF];
 static bool ANAL_M_FLAGS_SET[0xFFFF];
 static bool ANAL_X_FLAGS_SET[0xFFFF];
 
-static int reg_read(RAnalEsil *esil, const char *regname, ut64 *num) {
-	RRegItem *reg = r_reg_get (esil->anal->reg, regname, -1);
-	if (reg) {
-		if (num)
-			*num = r_reg_get_value (esil->anal->reg, reg);
-		return 1;
-	}
-	return 0;
-}
-
-static int reg_write(RAnalEsil *esil, const char *regname, ut64 num) {
-	RRegItem *reg = r_reg_get (esil->anal->reg, regname, -1);
-	if (reg) {
-		if (num)
-			r_reg_set_value (esil->anal->reg, reg,num);
-		return 1;
-	}
-	return 0;
-}
 
 //  return the current value of a status flag
 static ut16 read_flag_value(const char* flag_name, RAnal *anal){
@@ -42,7 +34,7 @@ static ut16 read_flag_value(const char* flag_name, RAnal *anal){
   return r_reg_get_value(anal->reg, r_reg_get(anal->reg, flag_name, -1));
 }
 
-static char* parse_anal_args(OpCode *opcd, RAnalOp *op, unsigned int pc, unsigned int pb, const unsigned char *buf, int prefix, bool flag_x, bool flag_m, RAnal* a, ut64 addr){
+static char* parse_anal_args(const OpCode *opcd, RAnalOp *op, unsigned int pc, unsigned int pb, const unsigned char *buf, int prefix, bool flag_x, bool flag_m, RAnal* a, ut64 addr){
 
 	int var;
 	signed char varS;
@@ -289,7 +281,7 @@ static char* parse_anal_args(OpCode *opcd, RAnalOp *op, unsigned int pc, unsigne
  * Calculate addressing params for data location
  * Also fill out operands for anal pointer (pass by ref) 
 */
-static char* calc_addressing(RAnal *anal, RAnalOp *op, OpCode* opcd, char* addr, char* param){
+static char* calc_addressing(RAnal *anal, RAnalOp *op, const OpCode* opcd, char* addr, char* param){
 
 	char* ret = (char*)malloc(20);// allocate return characters
 
@@ -434,17 +426,17 @@ static char* calc_addressing(RAnal *anal, RAnalOp *op, OpCode* opcd, char* addr,
 
 }
 
-static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int len) {
+static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, RAnalOpMask mask) {
 
 	if (op == NULL)
 		return 0;
 
- 	r_strbuf_init (&op->esil); 
-	OpCode* opcd;
+	const OpCode* opcd;
 	memset(op, 0, sizeof(RAnalOp));
+	r_strbuf_init(&op->esil);
 	ut16 flag = 0x0;
 	int prefix = 0;
-	ut8 instruction = read_8(data, 0); // grab the instruction from the r_asm method
+	ut8 instruction = read_8(buf, 0); // grab the instruction from the r_asm method
 
 	op->id = opcd->op;
 	op->addr = addr;
@@ -460,16 +452,16 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 	// pull the prefix of the instruction off, grabing from the tables corresponding to the addressing mode
 	switch (instruction){
 		// first two cases, remove prefix - otherwise just pass instruction
-		case 0x42: // x42 prefix - 
-			instruction = read_8(data, op->size); // grab next instruction from buffer, with offset of 1
+		case 0x42: // x42 prefix -
+			instruction = read_8(buf, op->size); // grab next instruction from buffer, with offset of 1
 			opcd = GET_OPCODE (instruction, 0x42); // grab opcode from instruction
 			op->size++;
 			prefix = 42;
 			op->prefix = 0x42;
 			break;
 		case 0x89: // x89 prefix  -
-			
-			instruction = read_8(data, op->size); // grab next instruction from buffer, with offset of 1
+
+			instruction = read_8(buf, op->size); // grab next instruction from buffer, with offset of 1
 			opcd = GET_OPCODE (instruction, 0x89); // grab opcode from instruction
 			op->size++;
 			prefix = 89;
@@ -568,7 +560,7 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 	r_strbuf_init(&op->esil);
 	RReg *reg = anal->reg;
 	//ANAL_X_FLAGS[op->addr]
-	char* vars = parse_anal_args(opcd, op, op->addr & 0xffff, op->addr>>16, data, prefix, !(ANAL_GLOB_X) && (opcd->flag == X), !(ANAL_GLOB_M) && (opcd->flag == M), anal, op->addr);
+	char* vars = parse_anal_args(opcd, op, op->addr & 0xffff, op->addr>>16, buf, prefix, !(ANAL_GLOB_X) && (opcd->flag == X), !(ANAL_GLOB_M) && (opcd->flag == M), anal, op->addr);
 
 	vars = strtok(vars, " ,.-");
 	int num_ops = (int) (vars[0] - '0');
@@ -581,20 +573,19 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 		i++;
   	}
 
-	unsigned char* buf;
-	free (vars);
+	free(vars);
 
 	switch (opcd->op) {
 		
 		case SEB:
 			r_strbuf_setf(&op->esil, "%s,%s,[],|=", ops[1], ops[2]);
 			op->type = R_ANAL_OP_TYPE_OR;
-			op->ptr = ops[2];
+			op->ptr = r_num_get(NULL, (const char*) ops[2]);
 			break;
 		case CLB:
 			r_strbuf_setf(&op->esil, "%s,%s,[],^=", ops[1], ops[2]);
 			op->type = R_ANAL_OP_TYPE_XOR;
-			op->ptr = ops[2];
+			op->ptr = r_num_get(NULL, (const char*) ops[2]);
 			break;
 
 		// load instructions (all kind of the same)
@@ -615,7 +606,10 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 				case LDM5X: case LDM4X:
 					r_strbuf_setf(&op->esil, "%s,%s,xl,+,[],=", ops[1], ops[2]);
 					op->type = R_ANAL_OP_TYPE_LOAD;
-					op->ptr = r_num_get (NULL, (const char*) ops[2]) + r_anal_esil_reg_read(&op->esil, "xl", NULL, NULL);
+					/* original code added r_anal_esil_reg_read() return value (0/1 success
+					 * flag, not the register value) instead of using the *num out-parameter;
+					 * xl is also 0 during static analysis before ESIL emulation anyway */
+					op->ptr = r_num_get(NULL, (const char*) ops[2]);
 					break;
 				default:
 					r_strbuf_setf(&op->esil, "%s,%s,[],=", ops[1], ops[2]);
@@ -827,8 +821,8 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 					break;
 				default:
 					op->type = R_ANAL_OP_TYPE_XOR | R_ANAL_OP_TYPE_IND;
-					op->ptr = ops[2];
-					r_strbuf_setf (&op->esil, "%s,%s,[],^,%s,=,$z,zf,=",ops[1], ops[2], ops[1]);
+					op->ptr = r_num_get(NULL, (const char*) ops[2]);
+					r_strbuf_setf(&op->esil, "%s,%s,[],^,%s,=,$z,zf,=", ops[1], ops[2], ops[1]);
 				break;
 				}
 			break;
@@ -984,7 +978,7 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 			op->type = R_ANAL_OP_TYPE_CJMP;
 			op->jump = r_num_get (NULL, (const char *)ops[3]); // grab op conditional		
 			r_strbuf_setf(&op->esil, "%s,&=,%s,?{,2,s,-=,pc,s,=[2],%s,pc,=,}", ops[1], ops[2], ops[3]);// set stack ptr
-			op->cond = R_ANAL_COND_EQ;
+			op->cond = R_ANAL_CONDTYPE_EQ;
 			op->fail = op->addr + op->size;
 			break;
 
@@ -993,7 +987,7 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 			op->jump = r_num_get (NULL, (const char *)ops[1]);//r_num_get (NULL, (const char *)ops[1]);; // grab op conditional 
 			//printf("op jump on bcc: 0x%0x04", op->jump);
 			op->fail = op->addr + op->size;
-			op->cond = R_ANAL_COND_NV;
+			op->cond = R_ANAL_CONDTYPE_NV;
 			r_strbuf_setf(&op->esil,"cf,!,?{,2,s,-=,pc,s,=[2],%s,pc,=,}",
 										ops[1]
 			); // push PC to stack
@@ -1139,79 +1133,27 @@ static int m7700_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
 	return op->size;
 }
 
-static int set_reg_profile_7700(RAnal *anal) {
-	const char *p = 
-		"=SP	s\n"
-		"=ZF	zf\n"
-		"=CF	cf\n"		
-		"=SF	nf\n"
-		"=OF	of\n"
-		"=PC	pc\n"
-		"=A0	a\n"
-		"=A1	b\n"
-		"=A2	x\n"
-		"=A3	y\n"
-		"gpr	pc	.16 8	0\n" // program counter
-		"gpr	pch	.8  16	0\n"  // high bits for program counter 
-		"gpr	pcl	.8  8	0\n"  // low bits for program counter
-		"gpr	pg	.8  0	0\n"  // program bank register, highest 8 bits of PC
-		"gpr	s	.16 24	0\n" // stack pointer
-		"gpr	ax	.16 40	0\n" // accumulator A
-		//"gpr    ah      .8  8  0\n"  // high 8 bits of A - remains unchanged when M flag set
-		"gpr	al	.8  40	0\n"  // low 8 bits of A
-		"gpr	bx	.16 56	0\n" // accumulator B
-		//"gpr    bh      .8  8  0\n"  // high 8 bits of B
-		"gpr	bl	.8  56	0\n"  // low 8 bits of B
-		"gpr	x	.16  72	0\n"  // index register X 
-		"gpr	xl	.8  72	0\n"  // low bits for index register X - active when X flag set		
-		"gpr	y	.16  88	0\n"  // index register Y 
-		"gpr	yl	.8  88	0\n"  // low bits for index register Y - active when X flag set
-		"gpr	db	.8	96	0\n"  // data bank register
-		"gpr	dpr	.16	104	0\n"  // direct page register
-		"gpr	ps	.8	120	0\n"  // processor status register
-		"flg	cf	.1	127	0\n"  // carry flag - bit 0 of PS
-		"flg	zf	.1	126	0\n"  // zero flag - bit 1 of PS
-		"flg	id	.1	125	0\n"  // interrupt disable flag - bit 2
-		"flg	dm	.1	124	0\n"  // decimal mode flag - bit 3
-		"flg	ix	.1	123	0\n"  // index register length flag - bit 4
-		"flg	m	.1	122	0\n"  // data length flag - bit 5
-		"flg	of	.1	121	0\n"  // overflow flag	- bit 6
-		"flg	nf	.1	120	0\n"  // negative flag - bit 7
-		"gpr	ipr	.4	128	0\n"  // interrupt priority reg
-		;
-	return r_reg_set_profile_string (anal->reg, p);
+/* reg profile is provided by arch_m7700 via RArchPlugin.regs */
+
+static int m7700_eligible(RAnal *a) {
+	return a && a->config && !strcmp(a->config->arch, "m7700");
 }
 
-static int esil_m7700_init (RAnalEsil *esil) {
-  return true;
-}
-
-static int esil_m7700_fini (RAnalEsil *esil) {
-  	return true;
-}
-
-struct r_anal_plugin_t r_anal_plugin_m7700 = {
-	.name = "m7700",
-	.desc = "Disassembly plugin for Mitsubishi M7700 Arch",
-	.license = "None",
-	.arch = "m7700",
-	.bits = 16,
-	.esil=true,
-	.op = &m7700_anal_op,
-	.set_reg_profile = &set_reg_profile_7700,
-	.init = &esil_m7700_init,
-	.fini = NULL, //&esil_m7700_fini,
-	.fingerprint_bb = NULL,
-	.fingerprint_fcn = NULL,
-	.diff_bb = NULL,
-	.diff_fcn = NULL,
-	.diff_eval = NULL
+RAnalPlugin r_anal_plugin_m7700 = {
+	.meta = {
+		.name    = "m7700",
+		.desc    = "Analysis plugin for Mitsubishi M7700 Arch",
+		.license = "None",
+	},
+	.eligible = m7700_eligible,
+	.op       = &m7700_anal_op,
 };
 
 #ifndef CORELIB
 struct r_lib_struct_t radare_plugin = {
-  .type = R_LIB_TYPE_ANAL,
-  .data = &r_anal_plugin_m7700,
-  .version = R2_VERSION
+	.type       = R_LIB_TYPE_ANAL,
+	.data       = &r_anal_plugin_m7700,
+	.version    = R2_VERSION,
+	.abiversion = R2_ABIVERSION,
 };
 #endif
